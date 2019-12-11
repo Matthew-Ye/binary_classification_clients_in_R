@@ -1,0 +1,325 @@
+---
+title: "finance"
+author: "Mingjie Ye"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+In this project, I will build binary classification models that classify the clients according to the credit quality (ability to repay a credit loan in according to the contractual terms). We will build Logistic Regression,Lasso (least absolute shrinkage and selection operator) Regression,Decision Tree,Random Forest and LDA (Linear discriminant analysis) models and compare them accordinig to the cost and accuracy.
+
+## Setup and review the dataset
+```{r include=FALSE}
+library(rpart)
+library(caret)
+library(tidyverse)
+library(data.table)
+library(GGally)
+library(corrplot)
+library(verification)
+library(ROCR)
+library(maptree)
+library(glmnet)
+library(gridExtra)
+library(randomForest)
+library(mgcv)
+library(nnet)
+library(pROC)
+library(gbm)
+library(e1071)
+library(xgboost)
+library(DT)
+library(NeuralNetTools)
+library(rpart.plot)
+source('roc.R')
+source('my_regularization.R')
+
+## Accuracy function
+accuracy <- function(actual, predicted) {
+  m<-mean(actual==predicted)
+  return(m)
+}
+
+## Cost function
+cost2 <- function(actual, predicted) {
+  return(auc(roc(actual,predicted))[1])
+}
+
+# threshold for ROC
+thresh<-seq(0,1,0.001)
+
+setwd('/users/mingjie/desktop/finance')
+data<-fread('Balances_final.csv')
+
+head(data)
+```
+
+Let's check the dataset if there is NA value. 
+```{r}
+colSums(is.na(data))
+```
+
+Change the target to factor and check the class of each attributes. I found the classes of some columns are character, but I hope they are numeric so that we can do some analysis. So I change them to numeric.
+```{r}
+data$target<-as.factor(data$target)
+sapply(data, class)
+```
+
+```{r}
+data_num <- as.data.frame(apply(data, 2, as.numeric))
+```
+
+However, we found there are many NAs. When I check the original csv dataset, I found there are ',' in some cells which should be '.'. So, I replace these ',' with '.' and create and use a new csv file called 'new_Balances_final.csv'. Besides, I also replace three targets of rows whose target is 2 with 1 because it should be a binary target.
+
+```{r}
+data<-fread('new_Balances_final.csv')
+data$target<-as.factor(data$target)
+sapply(data, class)
+```
+
+## Preparing the trainset and testset
+
+I divide the dataset into trainset (80%) and testset (20%)
+```{r}
+set.seed(1)
+indexes<-sample(nrow(data),0.8*nrow(data),replace = F)
+train<-data[indexes,2:34]
+test<-data[-indexes,2:34]
+dim(train)
+dim(test)
+```
+
+## Analysis
+Let's the the correlationship of these variables.
+
+```{r}
+cormat<-cor(train[,-'target'])
+corrplot(cormat,method='square', tl.pos = FALSE)
+```
+
+Then, let's check the distributions of each variables with target.
+```{r}
+p1<-ggplot(data = train,aes(x = target,y = NON_CURRENT_ASSETS,fill=target))+geom_boxplot()
+p2<-ggplot(data = train,aes(x = target,y = tangible_fixed_assets,fill=target))+geom_boxplot()
+p3<-ggplot(data = train,aes(x = target,y = CURRENT_ASSETS,fill=target))+geom_boxplot()
+p4<-ggplot(data = train,aes(x = target,y = cash_other_liquid_assets,fill=target))+geom_boxplot()
+p5<-ggplot(data = train,aes(x = target,y = STOCKS,fill=target))+geom_boxplot()
+p6<-ggplot(data = train,aes(x = target,y = debtors_other_short_term,fill=target))+geom_boxplot()
+p7<-ggplot(data = train,aes(x = target,y = TOTAL_ASSETS,fill=target))+geom_boxplot()
+p8<-ggplot(data = train,aes(x = target,y = net_worth,fill=target))+geom_boxplot()
+p9<-ggplot(data = train,aes(x = target,y = NON_CURRENT_LIABILITIES,fill=target))+geom_boxplot()
+p10<-ggplot(data = train,aes(x = target,y = CURRENT_LIABILITIES,fill=target))+geom_boxplot()
+p11<-ggplot(data = train,aes(x = target,y = SUPPLIERS,fill=target))+geom_boxplot()
+p12<-ggplot(data = train,aes(x = target,y = TOTAL_LIABILITIES,fill=target))+geom_boxplot()
+p13<-ggplot(data = train,aes(x = target,y = OTHER_OPERATION_EXPENSES,fill=target))+geom_boxplot()
+p14<-ggplot(data = train,aes(x = target,y = ORDINARY_EBITDA,fill=target))+geom_boxplot()
+p15<-ggplot(data = train,aes(x = target,y = Non_Ordinary_Result,fill=target))+geom_boxplot()
+p16<-ggplot(data = train,aes(x = target,y = NET_OPERATION_RESULT,fill=target))+geom_boxplot()
+p17<-ggplot(data = train,aes(x = target,y = FINANCIAL_INCOMES,fill=target))+geom_boxplot()
+p18<-ggplot(data = train,aes(x = target,y = FINANCIAL_EXPENSES,fill=target))+geom_boxplot()
+p19<-ggplot(data = train,aes(x = target,y = FINANCIAL_RESULTS,fill=target))+geom_boxplot()
+p20<-ggplot(data = train,aes(x = target,y = BENEFITS_BEFORE_TAXES,fill=target))+geom_boxplot()
+p21<-ggplot(data = train,aes(x = target,y = COMPANIES_TAX,fill=target))+geom_boxplot()
+p22<-ggplot(data = train,aes(x = target,y = BANK_INDEBTEDNESS,fill=target))+geom_boxplot()
+p23<-ggplot(data = train,aes(x = target,y = GROSS_FINANCIAL_DEBT,fill=target))+geom_boxplot()
+p24<-ggplot(data = train,aes(x = target,y = Net_result,fill=target))+geom_boxplot()
+p25<-ggplot(data = train,aes(x = target,y = CLIENT_COLLECTING,fill=target))+geom_boxplot()
+p26<-ggplot(data = train,aes(x = target,y = REVENUES_VARIATION,fill=target))+geom_boxplot()
+p27<-ggplot(data = train,aes(x = target,y = Exercise_result,fill=target))+geom_boxplot()
+p28<-ggplot(data = train,aes(x = target,y = Income,fill=target))+geom_boxplot()
+p29<-ggplot(data = train,aes(x = target,y = other_operation_incomes,fill=target))+geom_boxplot()
+p30<-ggplot(data = train,aes(x = target,y = personnel_expenses,fill=target))+geom_boxplot()
+p31<-ggplot(data = train,aes(x = target,y = depreciation_provision,fill=target))+geom_boxplot()
+p32<-ggplot(data = train,aes(x = target,y = ROLLING_FUND,fill=target))+geom_boxplot()
+
+grid.arrange(p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,nrow=4)
+```
+
+```{r}
+grid.arrange(p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,nrow=4)
+```
+
+## Regularization
+
+Before building our models, I regularize the dataset in order to overcome overfitting.
+```{r}
+train<-regularize(train)
+test<-regularize(test)
+```
+
+## Model 1: Logistic regression
+
+The first model is logistic regression. I calculate the AUC with the fun.auc() provided. Then show the ROC graph. The AUC is 0.562.
+```{r}
+full.log.probit<-glm(data = train,target~.,family = binomial(link=probit))
+summary(full.log.probit)
+
+full.log.probit.prediction<-predict(full.log.probit,type = "response")
+fun.auc(full.log.probit.prediction,train$target)
+pROC_obj <- roc(train$target,full.log.probit.prediction,
+                smoothed = TRUE,
+                # arguments for ci
+                ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+                # arguments for plot
+                plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+                print.auc=TRUE, show.thres=TRUE)
+
+sens.ci <- ci.se(pROC_obj)
+plot(sens.ci, type="shape", col="lightblue")
+plot(sens.ci, type="bars")
+```
+
+## Model 2: Lasso (least absolute shrinkage and selection operator) Regression
+
+I want to select variables that are most important.
+```{r}
+# Model 2:LASSO
+X<-scale(train[,-'target'])
+X<-as.matrix(X)
+Y<- as.matrix(train[,'target'])
+lasso.fit<- glmnet(x=X, y=Y, family = "binomial", alpha = 1)
+plot(lasso.fit, xvar = "lambda")
+```
+
+We want to choose the optimum value of lambda using Cross Validation. 
+```{r}
+cv.lasso<- cv.glmnet(x=X, y=Y,family = "binomial", alpha = 1, nfolds = 10)
+plot(cv.lasso)
+# cv.lasso$lambda.min
+# cv.lasso$lambda.1se
+
+# Choose cv.lasso$lambda.1se
+coef(lasso.fit, s=cv.lasso$lambda.1se)
+## Predictions using, s=cv.lasso$lambda.1se
+pred.lasso<- predict(lasso.fit, newx = X, s=cv.lasso$lambda.1se,type = 'response')
+roc.plot(x = train$target == "1", pred = pred.lasso,thresholds = thresh)$roc.vol
+```
+
+Finally, we got AUC with 0.6892991.
+
+## Model 3: Classification Tree
+
+```{r}
+full.rpart<-rpart(data = train,target~.,method = 'class')
+rpart.plot(full.rpart)
+plotcp(full.rpart)
+printcp(full.rpart)
+rpart.prediction<-predict(full.rpart,type = 'prob')
+roc.plot(x = train$target == "1", pred = rpart.prediction[,2],thresholds = thresh)$roc.vol
+```
+
+The AUC is 0.8270479.
+
+## Model 4: Random forest
+
+```{r}
+full.randomForest<-randomForest(data=train,target~.,ntree=1000)
+plot(full.randomForest)
+rf.predicted<-predict(full.randomForest,type = 'prob')
+roc.plot(x = train$target == "1", pred = rf.predicted[,2],thresholds = thresh)$roc.vol
+```
+
+The AUC is 0.9765175.
+
+##  Model 5: Linear Discriminant Analysis
+```{r}
+model.lda<-lda(data=train,target~.)
+lda.predicted<-predict(model.lda)$posterior[,2]
+roc.plot(x=train$target=="1",pred=lda.predicted,thresholds = thresh)$roc.vol
+```
+
+The AUC is 0.8274339.
+
+## Comparision
+
+When we compare the results of the five models, we can find that random forest is the best with the highest AUC of 0.9765175.
+```{r}
+roc.plot(x=train$target=="1",pred=cbind(full.log.probit.prediction,pred.lasso,
+                                       rpart.prediction[,2],rf.predicted[,2],lda.predicted),legend = T,
+         leg.text = c("Logistic","Lasso","DecisionTree",
+                      "RandomForest","LDA"),thresholds = thresh)$roc.vol
+```
+
+Then, we compare them with testset. The result is similar: Random Forest has the best peformance.
+```{r}
+X<-scale(test[,-'target'])
+X<-as.matrix(X)
+
+logit.test.pred<-predict(full.log.probit,test,type = 'response')
+lasso.test.pred<-predict(lasso.fit, newx = X, s=cv.lasso$lambda.1se,type = 'response')
+rpart.test.pred<-predict(full.rpart,test,type = 'prob')
+rf.test.pred<-predict(full.randomForest,test,type = 'prob')[,2]
+lda.test.pred<-predict(model.lda,test)$posterior[,2]
+
+roc.plot(x=test$target=="1",pred=cbind(logit.test.pred,lasso.test.pred,
+                                      rpart.test.pred[,2],rf.test.pred,
+                                      lda.test.pred),legend = T,
+         leg.text = c("Logistic","Lasso","DecisionTree",
+                      "RandomForest","LDA"),thresholds = thresh)$roc.vol
+```
+
+
+Show the comparision results in table in order:
+```{r}
+models<-c("Logistic Reg","Lasso Reg","DecisionTree","RandomForest","LDA")
+TrainAuc<-c(cost2(train$target,as.numeric(full.log.probit.prediction)),cost2(train$target,as.numeric(pred.lasso)),
+            cost2(train$target,as.numeric(rpart.prediction[,2])),cost2(train$target,as.numeric(rf.predicted[,2])),
+            cost2(train$target,as.numeric(lda.predicted)))
+
+TestAuc<-c(cost2(test$target,as.numeric(logit.test.pred)),cost2(test$target,as.numeric(lasso.test.pred)),
+           cost2(test$target,as.numeric(rpart.test.pred[,2])),cost2(test$target,as.numeric(rf.test.pred)),
+           cost2(test$target,as.numeric(lda.test.pred)))
+
+results<-as.data.frame(cbind(models,TrainAuc,TestAuc))
+results<-results%>%arrange(desc(TestAuc))
+datatable(results)
+```
+
+## Find optimum cutoff probability for minimizing the cost function
+
+Finally, I want to find optimum cutoff probability for minimizing the cost function or maximizing the accuracy function. Here, I maximize the accuracy function and pursue the highest accuracy which is 0.9828881.
+
+```{r}
+probs<-seq(0,1,0.001)
+cost<-NULL
+for (i in 1:1000)
+{
+  cutoff<-probs[i]
+  predicted<-ifelse(rf.predicted[,2]>cutoff,1,0)
+  cost[i]<-accuracy(train$target,predicted)
+}
+plot(1:1000,cost)
+cutoffProb<-probs[which(cost==max(cost))]
+cutoffProb
+
+predicted<-ifelse(rf.test.pred>cutoffProb,1,0)
+cm<-confusionMatrix(as.factor(predicted),test$target)
+cm[2]
+cm[3]$overall[1]
+# the highest accuracy
+probs<-seq(0,1,0.001)
+cost<-NULL
+for (i in 1:1000)
+{
+  cutoff<-probs[i]
+  predicted<-ifelse(rf.predicted[,2]>cutoff,1,0)
+  cost[i]<-accuracy(train$target,predicted)
+}
+plot(1:1000,cost)
+cutoffProb<-probs[which(cost==max(cost))]
+cutoffProb
+
+predicted<-ifelse(rf.test.pred>cutoffProb,1,0)
+cm<-confusionMatrix(as.factor(predicted),test$target)
+cm[2]
+cm[3]$overall[1]
+# the highest accuracy
+```
+
+## Conclusion
+In conclusion, compared with the five models, I finally recommend choosinv random forest model and the accuracy is 0.9828881 which is very high and satisfying. 
